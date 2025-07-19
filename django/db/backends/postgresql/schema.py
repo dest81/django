@@ -282,15 +282,7 @@ class DatabaseSchemaEditor(BaseDatabaseSchemaEditor):
             strict,
         )
         # Added an index? Create any PostgreSQL-specific indexes.
-        if (
-            (not (old_field.db_index or old_field.unique) and new_field.db_index)
-            or (not old_field.unique and new_field.unique)
-            or (
-                self._is_changing_type_of_indexed_text_column(
-                    old_field, old_type, new_type
-                )
-            )
-        ):
+        if self._should_index_be_created(old_field, new_field, old_type, new_type):
             like_index_statement = self._create_like_index_sql(model, new_field)
             if like_index_statement is not None:
                 self.execute(like_index_statement)
@@ -301,6 +293,18 @@ class DatabaseSchemaEditor(BaseDatabaseSchemaEditor):
                 model._meta.db_table, [old_field.column], suffix="_like"
             )
             self.execute(self._delete_index_sql(model, index_to_remove))
+
+    def _should_index_be_created(self, old_field, new_field, old_type, new_type):
+        if not (new_field.db_index or new_field.unique):
+            return False
+
+        if not (old_field.db_index or old_field.unique):
+            return True
+
+        if self._is_changing_type_of_indexed_text_column(old_field, old_type, new_type):
+            return True
+
+        return False
 
     def _index_columns(self, table, columns, col_suffixes, opclasses):
         if opclasses:
