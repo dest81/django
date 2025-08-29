@@ -38,6 +38,9 @@ class MigrationTestBase(TransactionTestCase):
         with connections[using].cursor() as cursor:
             return connections[using].introspection.get_table_description(cursor, table)
 
+    def _get_index_name_for_field(self, table_name, field_name):
+        return connection.schema_editor()._create_index_name(table_name, field_name)
+
     def assertTableExists(self, table, using="default"):
         with connections[using].cursor() as cursor:
             self.assertIn(table, connections[using].introspection.table_names(cursor))
@@ -108,7 +111,7 @@ class MigrationTestBase(TransactionTestCase):
                     .values()
                     if (
                         c["columns"] == list(columns)
-                        and (index_type is None or c["type"] == index_type)
+                        and (index_type is None or c.get("type") == index_type)
                         and not c["unique"]
                     )
                 ),

@@ -1,3 +1,4 @@
+from enum import unique
 import math
 from decimal import Decimal
 
@@ -18,6 +19,7 @@ from django.test import (
     skipUnlessDBFeature,
 )
 from django.test.utils import CaptureQueriesContext
+from unittest import skipUnless
 
 from .models import FoodManager, FoodQuerySet, UnicodeModel
 from .test_base import OperationTestBase
@@ -6886,6 +6888,275 @@ class FieldOperationTests(SimpleTestCase):
         self.assertIs(operation.references_field("Model", "bar", "migrations"), True)
         self.assertIs(operation.references_field("Model", "alien", "migrations"), False)
         self.assertIs(operation.references_field("Other", "foo", "migrations"), False)
+
+
+@skipUnless(connection.vendor == "postgresql", "PostgreSQL tests")
+class PostgreSQLExtraIndexTests(OperationTestBase):
+    def test_add_db_index(self):
+        operation1 = migrations.CreateModel(
+            "Pony",
+            [
+                ("id", models.AutoField()),
+                ("pink", models.TextField()),
+            ],
+        )
+        operation2 = migrations.AlterField(
+            "Pony",
+            "pink",
+            models.TextField(db_index=True),
+        )
+        project_state = ProjectState()
+        new_state = project_state.clone()
+
+        with connection.schema_editor() as editor:
+            operation1.state_forwards("migrtest", new_state)
+            operation1.database_forwards("migrtest", editor, project_state, new_state)
+            project_state, new_state = new_state, new_state.clone()
+
+        with connection.schema_editor() as editor:
+            operation2.state_forwards("migrtest", new_state)
+            operation2.database_forwards("migrtest", editor, project_state, new_state)
+            project_state, new_state = new_state, new_state.clone()
+
+        index_name = self._get_index_name_for_field("migrtest_pony", ["pink"])
+        self.assertIndexNameExists("migrtest_pony", index_name)
+        self.assertIndexNameExists("migrtest_pony", index_name + "_like")
+
+    def test_add_unique_constraint(self):
+        operation1 = migrations.CreateModel(
+            "Pony",
+            [
+                ("id", models.AutoField()),
+                ("pink", models.TextField()),
+            ],
+        )
+        operation2 = migrations.AlterField(
+            "Pony",
+            "pink",
+            models.TextField(unique=True),
+        )
+        project_state = ProjectState()
+        new_state = project_state.clone()
+
+        with connection.schema_editor() as editor:
+            operation1.state_forwards("migrtest", new_state)
+            operation1.database_forwards("migrtest", editor, project_state, new_state)
+            project_state, new_state = new_state, new_state.clone()
+
+        with connection.schema_editor() as editor:
+            operation2.state_forwards("migrtest", new_state)
+            operation2.database_forwards("migrtest", editor, project_state, new_state)
+            project_state, new_state = new_state, new_state.clone()
+
+        index_name = self._get_index_name_for_field("migrtest_pony", ["pink"])
+        self.assertIndexNameNotExists("migrtest_pony", index_name)
+        self.assertIndexNameExists("migrtest_pony", index_name + "_uniq")
+        self.assertIndexNameExists("migrtest_pony", index_name + "_like")
+
+    def test_add_unique_to_indexed_field(self):
+        # SlugField sets db_index=True by default
+        operation1 = migrations.CreateModel(
+            "Pony",
+            [
+                ("id", models.AutoField()),
+                ("pink", models.SlugField()),
+            ],
+        )
+        operation2 = migrations.AlterField(
+            "Pony",
+            "pink",
+            models.SlugField(unique=True),
+        )
+        project_state = ProjectState()
+        new_state = project_state.clone()
+
+        with connection.schema_editor() as editor:
+            operation1.state_forwards("migrtest", new_state)
+            operation1.database_forwards("migrtest", editor, project_state, new_state)
+            project_state, new_state = new_state, new_state.clone()
+
+        with connection.schema_editor() as editor:
+            operation2.state_forwards("migrtest", new_state)
+            operation2.database_forwards("migrtest", editor, project_state, new_state)
+            project_state, new_state = new_state, new_state.clone()
+
+        index_name = self._get_index_name_for_field("migrtest_pony", ["pink"])
+        self.assertIndexNameNotExists("migrtest_pony", index_name)
+        self.assertIndexNameExists("migrtest_pony", index_name + "_uniq")
+        self.assertIndexNameExists("migrtest_pony", index_name + "_like")
+
+    def test_convert_index_to_unique(self):
+        # SlugField sets db_index=True by default
+        operation1 = migrations.CreateModel(
+            "Pony",
+            [
+                ("id", models.AutoField()),
+                ("pink", models.SlugField()),
+            ],
+        )
+        operation2 = migrations.AlterField(
+            "Pony",
+            "pink",
+            models.TextField(unique=True),
+        )
+        project_state = ProjectState()
+        new_state = project_state.clone()
+
+        with connection.schema_editor() as editor:
+            operation1.state_forwards("migrtest", new_state)
+            operation1.database_forwards("migrtest", editor, project_state, new_state)
+            project_state, new_state = new_state, new_state.clone()
+
+        with connection.schema_editor() as editor:
+            operation2.state_forwards("migrtest", new_state)
+            operation2.database_forwards("migrtest", editor, project_state, new_state)
+            project_state, new_state = new_state, new_state.clone()
+
+        index_name = self._get_index_name_for_field("migrtest_pony", ["pink"])
+        self.assertIndexNameNotExists("migrtest_pony", index_name)
+        self.assertIndexNameExists("migrtest_pony", index_name + "_uniq")
+        self.assertIndexNameExists("migrtest_pony", index_name + "_like")
+
+    def test_convert_index_to_primary_key(self):
+        operation1 = migrations.CreateModel(
+            "Pony",
+            [
+                ("id", models.AutoField()),
+                ("pink", models.TextField(db_index=True)),
+            ],
+        )
+        operation2 = migrations.RemoveField("Pony", "id")
+        operation3 = migrations.AlterField(
+            "Pony",
+            "pink",
+            models.TextField(db_index=True, primary_key=True),
+        )
+        project_state = ProjectState()
+        new_state = project_state.clone()
+
+        with connection.schema_editor() as editor:
+            operation1.state_forwards("migrtest", new_state)
+            operation1.database_forwards("migrtest", editor, project_state, new_state)
+            project_state, new_state = new_state, new_state.clone()
+
+        with connection.schema_editor() as editor:
+            operation2.state_forwards("migrtest", new_state)
+            operation2.database_forwards("migrtest", editor, project_state, new_state)
+            project_state, new_state = new_state, new_state.clone()
+
+        index_name = self._get_index_name_for_field("migrtest_pony", ["pink"])
+        self.assertIndexNameExists("migrtest_pony", index_name)
+        self.assertIndexNameExists("migrtest_pony", index_name + "_like")
+
+        with connection.schema_editor() as editor:
+            operation3.state_forwards("migrtest", new_state)
+            operation3.database_forwards("migrtest", editor, project_state, new_state)
+            project_state, new_state = new_state, new_state.clone()
+
+        with connection.cursor() as cursor:
+            primary_keys = connection.introspection.get_primary_key_columns(
+                cursor, "migrtest_pony"
+            )
+        self.assertEqual(["pink"], primary_keys)
+
+        index_name = self._get_index_name_for_field("migrtest_pony", ["pink"])
+        self.assertIndexNameExists("migrtest_pony", index_name + "_pk")
+        self.assertIndexNameExists("migrtest_pony", index_name + "_like")
+
+    def test_convert_unique_to_primary_key(self):
+        operation1 = migrations.CreateModel(
+            "Pony",
+            [
+                ("id", models.AutoField()),
+                ("pink", models.TextField(unique=True)),
+            ],
+        )
+        operation2 = migrations.RemoveField("Pony", "id")
+        operation3 = migrations.AlterField(
+            "Pony",
+            "pink",
+            models.TextField(unique=True, primary_key=True),
+        )
+        project_state = ProjectState()
+        new_state = project_state.clone()
+
+        with connection.schema_editor() as editor:
+            operation1.state_forwards("migrtest", new_state)
+            operation1.database_forwards("migrtest", editor, project_state, new_state)
+            project_state, new_state = new_state, new_state.clone()
+
+        with connection.schema_editor() as editor:
+            operation2.state_forwards("migrtest", new_state)
+            operation2.database_forwards("migrtest", editor, project_state, new_state)
+            project_state, new_state = new_state, new_state.clone()
+
+        index_name = self._get_index_name_for_field("migrtest_pony", ["pink"])
+        self.assertIndexNameExists("migrtest_pony", "migrtest_pony_pink_key")
+        self.assertIndexNameExists("migrtest_pony", index_name + "_like")
+
+        with connection.schema_editor() as editor:
+            operation3.state_forwards("migrtest", new_state)
+            operation3.database_forwards("migrtest", editor, project_state, new_state)
+            project_state, new_state = new_state, new_state.clone()
+
+        with connection.cursor() as cursor:
+            primary_keys = connection.introspection.get_primary_key_columns(
+                cursor, "migrtest_pony"
+            )
+        self.assertEqual(["pink"], primary_keys)
+
+        index_name = self._get_index_name_for_field("migrtest_pony", ["pink"])
+        self.assertIndexNameNotExists("migrtest_pony", "pink_key")
+        self.assertIndexNameExists("migrtest_pony", index_name + "_pk")
+        self.assertIndexNameExists("migrtest_pony", index_name + "_like")
+
+    def test_slugfields_change_primary_key_operations(self):
+        operation1 = migrations.CreateModel(
+            "Pony",
+            [
+                ("pink", models.SlugField(max_length=20, primary_key=True)),
+                ("pink_second", models.SlugField(max_length=20)),
+            ],
+        )
+        operation2 = migrations.AlterField(
+            "Pony",
+            "pink",
+            models.SlugField(max_length=20, primary_key=False),
+        )
+        operation3 = migrations.AlterField(
+            "Pony",
+            "pink_second",
+            models.SlugField(max_length=20, primary_key=True),
+        )
+        project_state = ProjectState()
+        new_state = project_state.clone()
+        with connection.schema_editor() as editor:
+            operation1.state_forwards("migrtest", new_state)
+            operation1.database_forwards("migrtest", editor, project_state, new_state)
+            project_state, new_state = new_state, new_state.clone()
+
+        with connection.schema_editor() as editor:
+            operation2.state_forwards("migrtest", new_state)
+            operation2.database_forwards("migrtest", editor, project_state, new_state)
+            project_state, new_state = new_state, new_state.clone()
+
+        with connection.schema_editor() as editor:
+            operation3.state_forwards("migrtest", new_state)
+            operation3.database_forwards("migrtest", editor, project_state, new_state)
+
+        with connection.cursor() as cursor:
+            primary_keys = connection.introspection.get_primary_key_columns(
+                cursor, "migrtest_pony"
+            )
+        self.assertEqual(["pink_second"], primary_keys)
+
+        index_name = self._get_index_name_for_field("migrtest_pony", ["pink"])
+        self.assertIndexNameNotExists("migrtest_pony", index_name + "_pk")
+        self.assertIndexNameExists("migrtest_pony", index_name + "_like")
+
+        index_name = self._get_index_name_for_field("migrtest_pony", ["pink_second"])
+        self.assertIndexExists("migrtest_pony", ["pink"], index_type="idx")
+        self.assertIndexExists("migrtest_pony", ["pink_second"], index_type="idx")
 
 
 class BaseOperationTests(SimpleTestCase):
