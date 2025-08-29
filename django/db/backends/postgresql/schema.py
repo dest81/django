@@ -282,6 +282,18 @@ class DatabaseSchemaEditor(BaseDatabaseSchemaEditor):
             strict,
         )
         # Added an index? Create any PostgreSQL-specific indexes.
+        # list of scenarios when `LIKE` indexes should be created
+        # -------------------------------------
+        #      old_field    |     new_field
+        # db_index | unique | db_index | unique
+        # -------------------------------------
+        # False    | False  | True     | False
+        # False    | False  | False    | True
+        # True     | False  | True     | True  *
+        # True     | False  | False    | True  *
+        # * special case - `LIKE` index was removed along with the regular index
+        # during conversion from non-unique to unique (i.e., from a non-primary_key
+        # field to a primary_key field).
         if (
             (not (old_field.db_index or old_field.unique) and new_field.db_index)
             or (not old_field.unique and new_field.unique)
